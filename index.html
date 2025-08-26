@@ -41,7 +41,12 @@
     background:var(--card-bg);padding:8px 14px;border-radius:12px;display:flex;gap:16px;font-weight:600;
   }
 
-  #svgWrap{display:flex;justify-content:center;margin-top:10px}
+ 
+  #svgWrap svg {
+  width: 100%;
+  height: auto;
+  max-height: 85vh;
+}
 
   .tooltip{
     position:fixed;pointer-events:none;background:#0f172a;color:white;padding:6px 8px;border-radius:6px;
@@ -52,32 +57,52 @@
     position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
     background:rgba(0,0,0,0.8);color:#fff;font-size:28px;font-weight:700;padding:20px 40px;border-radius:12px;display:none;z-index:999;
   }
-  /* ✅ Mobile & Tablet Responsive Layout */
+/* Mobile layout adjustments */
 @media (max-width: 768px) {
-  .prompt, .scoreboard {
-    position: static;       /* remove absolute positioning */
-    margin: 10px auto;      /* center them */
-    max-width: 90%;
+  .scoreboard {
+    position: static;         /* remove absolute positioning */
+    margin: 12px auto 0 auto; /* center it below map */
+    justify-content: center;
+    gap: 20px;
+  }
+
+  .prompt {
+    position: static;          /* no absolute positioning */
+    margin: 12px auto;
+    font-size: 14px;
+    max-width: 95%;
     text-align: center;
+    padding: 8px 10px;
   }
 
-  #mapCard {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+  .prompt ul {
+    display: flex;             /* horizontal list */
+    flex-wrap: wrap;           /* wrap to next line */
+    justify-content: center;
+    gap: 10px 16px;            /* spacing */
+    padding: 0;
   }
 
-  #svgWrap {
-    width: 95vw;            /* fit screen width */
-    margin: 10px 0;
+  .prompt li {
+    margin: 0;
+    font-size: 14px;
   }
 
-  #svgWrap svg {
-    width: 100%;
+   svg {
+    aspect-ratio: auto;
+    width: 100%;        /* take full width */
     height: auto;
-    max-height: 70vh;       /* prevent overflowing vertically */
+    max-height: none;   /* remove artificial limit */
+  }
+
+  /* Flash message adjusted */
+  .flash {
+    font-size: 18px;
+    padding: 12px 20px;
+    border-radius: 8px;
   }
 }
+
 
 </style>
 </head>
@@ -288,19 +313,18 @@ pointsFromBonus += bonus;
 }
 
 /* D3 map setup */
+/* D3 map setup */
 const svgWrap = d3.select("#svgWrap");
-const width = Math.min(window.innerWidth * 0.95, 1000);
-const height = 700;
-const svg = svgWrap.append("svg").attr("viewBox", `0 0 ${width} ${height}`);
-const projection = d3.geoMercator()
-  .center([80, 8])
-  .scale(width * 1.1)
-  .translate([width/2, height/2.1]);
+const svg = svgWrap.append("svg")
+  .attr("preserveAspectRatio", "xMidYMid meet")   // keeps proportions
+  .attr("viewBox", "0 0 1000 700");               // base box, can tweak ratio
 
+const projection = d3.geoMercator();
 const pathGen = d3.geoPath().projection(projection);
 
 d3.json(mapUrl).then(geo=>{
   features = geo.features.map(f => ({...f, __name: f.properties?.NAME_1 || ""}));
+  projection.fitSize([1000, 700], geo);
 
   svg.selectAll("path.country")
     .data(features)
