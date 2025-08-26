@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Ye Mera India Quiz</title>
+
+<script src="https://d3js.org/d3.v6.min.js"></script>
+
+<style>
+  :root{
+    --bg:#eef2ff;
+    --card-bg: rgba(255,255,255,0.95);
+    --stroke: #94a3b8;
+    --fill-default: #e5e7eb;
+    --fill-wrong: #ef4444;
+    --fill-1: #22c55e;   /* green */
+    --fill-2: #3b82f6;   /* blue */
+    --fill-3: #c084fc;   /* purple */
+    --fill-reveal: #fb923c; /* orange */
+  }
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+  body{background:var(--bg);display:flex;flex-direction:column;align-items:center;}
+  .app{width:100%;max-width:1100px;padding:18px 12px 60px 12px;box-sizing:border-box;}
+  header{width:100%;display:flex;align-items:center;justify-content:center;position:relative;margin-bottom:12px}
+  h1{margin:0;font-size:20px}
+
+  .attempts.shake{animation:attemptsShake 0.35s ease-in-out;}
+  .score.pulse{animation:scorePulse 0.5s ease-in-out;}
+  @keyframes attemptsShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+  @keyframes scorePulse{0%{transform:scale(1)}50%{transform:scale(1.12)}100%{transform:scale(1)}}
+
+  .map-card {
+  background:var(--card-bg);
+  border-radius:14px;
+  padding:12px;
+  box-shadow:0 8px 32px rgba(15,23,42,0.07);
+  margin-top:6px;
+  position:relative;   /* 👈 add this so children can be positioned */
+  overflow:hidden;
+}
+
+.scoreboard {
+  position:absolute;    
+  bottom:14px;          /* stick to bottom of map */
+  left:50%;             /* center horizontally */
+  transform:translateX(-50%); /* adjust for true centering */
+  z-index:40;
+  background:var(--card-bg);
+  padding:8px 14px;
+  border-radius:10px;
+  box-shadow:0 6px 20px rgba(15,23,42,0.08);
+  display:flex;
+  gap:12px;
+  font-weight:600;
+  font-size:14px;
+}
+
+
+
+  svg{width:100%;height:700px;display:block}
+
+  /* NOTE: this sets the default, but JS will override via inline style */
+  path.country{fill:var(--fill-default);stroke:var(--stroke);stroke-width:0.5;cursor:pointer;transition:fill 200ms ease,opacity 200ms;}
+  path.country:hover{opacity:0.92}
+
+  .reveal{
+    fill: var(--fill-reveal) !important;
+    animation: revealPulse 1.1s ease-in-out infinite;
+  }
+  @keyframes revealPulse{
+    0%{filter:brightness(1);opacity:0.75}
+    50%{filter:brightness(1.08);opacity:1}
+    100%{filter:brightness(1);opacity:0.75}
+  }
+
+  .legend {
+  position:absolute;
+  left:50%;  /* center horizontally */
+  bottom:14px;
+  transform:translateX(-50%);
+  background:rgba(255,255,255,0.92);
+  padding:10px;
+  border-radius:10px;
+  box-shadow:0 6px 20px rgba(2,6,23,0.08);
+  font-size:13px;
+  display:flex;             /* 👈 make horizontal */
+  gap:16px;                 /* spacing between items */
+}
+.legend .row{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin-bottom:0;          /* 👈 no vertical stacking */
+}
+
+  .swatch{width:16px;height:16px;border-radius:4px;border:1px solid rgba(0,0,0,0.06);display:inline-block}
+
+  .tooltip{position:fixed;pointer-events:none;background:#0f172a;color:white;padding:6px 8px;border-radius:6px;font-size:13px;z-index:80;box-shadow:0 6px 20px rgba(2,6,23,0.5)}
+  .prompt{position:absolute;left:14px;top:14px;background:rgba(15,23,42,0.95);color:white;padding:10px 12px;border-radius:10px;font-weight:600}
+.celebration {
+  position:absolute;
+  left:50%;
+  transform:translateX(-50%);
+  top:12px;
+  font-size:20px;          /* 👈 same as prompt */
+  font-weight:600;         /* 👈 match */
+  z-index:50;
+  pointer-events:none;
+}
+  .end-panel{margin-top:12px;padding:12px;border-radius:12px;background:white;box-shadow:0 8px 20px rgba(2,6,23,0.06);text-align:left}
+</style>
+</head>
+<body>
+  <div class="app">
+    <header><h1>Find Indian States & UTs (Click the map)</h1></header>
+
+    <div class="scoreboard" id="scoreboard">
+      <div id="scoreEl" class="score">Score: 0</div>
+      <div id="attemptsEl" class="attempts">Attempts: 0/3</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-left:8px;font-weight:500">
+        <input id="muteChk" type="checkbox"> Mute
+      </label>
+    </div>
+
+    <div class="map-card" id="mapCard">
+      <div id="celebration" class="celebration" style="display:none"></div>
+      <div id="prompt" class="prompt">Loading map…</div>
+      <div id="svgWrap"></div>
+
+    <!--   <div class="legend" id="legendCard" aria-hidden="false">
+        <div style="font-weight:700;margin-bottom:6px">Legend</div>
+        <div class="row"><span class="swatch" style="background:var(--fill-1)"></span> 1st try</div>
+        <div class="row"><span class="swatch" style="background:var(--fill-2)"></span> 2nd try</div>
+        <div class="row"><span class="swatch" style="background:var(--fill-3)"></span> 3rd try</div>
+        <div class="row"><span class="swatch" style="background:var(--fill-reveal)"></span> Revealed (pulsing)</div>
+      </div> -->
+    </div>
+
+    <div id="endPanelHolder" style="margin-top:12px"></div>
+  </div>
+
+  <!-- Sounds -->
+  <audio id="s_cheer" preload="auto" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_7c6fa7b7e0.mp3?filename=success-fanfare-trumpets-6185.mp3"></audio>
+  <audio id="s_clap"  preload="auto" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_3d6a5eaf0a.mp3?filename=small-crowd-applause-6713.mp3"></audio>
+  <audio id="s_phew"  preload="auto" src="https://cdn.pixabay.com/download/audio/2023/09/13/audio_7f2d7d0701.mp3?filename=short-phew-174828.mp3"></audio>
+  <audio id="s_wrong" preload="auto" src="https://cdn.pixabay.com/download/audio/2022/03/10/audio_2b5be3a2d0.mp3?filename=error-126627.mp3"></audio>
+  <audio id="s_reveal" preload="auto" src="https://cdn.pixabay.com/download/audio/2022/01/19/audio_3b2e6cf3f5.mp3?filename=correct-answer-tone-106367.mp3"></audio>
+
+<script>
+const TARGET_STATES = [
+  "Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh",
+  "Goa","Gujarat","Haryana","Himachal Pradesh","Jharkhand",
+  "Karnataka","Kerala","Madhya Pradesh","Maharashtra","Manipur",
+  "Meghalaya","Mizoram","Nagaland","Orissa","Punjab",
+  "Rajasthan","Sikkim","Tamil Nadu","Telangana","Tripura",
+  "Uttar Pradesh","Uttaranchal","West Bengal",
+  "Andaman and Nicobar","Chandigarh",
+  "Dadra and Nagar Haveli", "Daman and Diu","Delhi",
+  "Jammu and Kashmir","Ladakh","Lakshadweep","Puducherry","Telangana"
+];
+
+const displayNameMap = new Map(TARGET_STATES.map(n => [normalizeName(n), n]));
+
+
+const NAME_ALIASES = new Map(Object.entries({
+  "United States": "United States of America",
+  "United States of America": "United States of America",
+  "Dem. Rep. Congo": "Democratic Republic of the Congo",
+  "Congo, Dem. Rep.": "Democratic Republic of the Congo",
+  "Congo (Kinshasa)": "Democratic Republic of the Congo",
+  "Congo, The Democratic Republic of the": "Democratic Republic of the Congo",
+  "Côte d'Ivoire": "Cote d'Ivoire",
+  "Viet Nam": "Vietnam",
+  "Iran (Islamic Republic of)": "Iran",
+  "Tanzania, United Republic of": "Tanzania",
+  "Libyan Arab Jamahiriya": "Libya",
+  "Russian Federation": "Russia"
+}));
+
+function normalizeName(name) {
+  if (!name) return "";  // safeguard
+  return name.toLowerCase().replace(/\s+/g, "");
+}
+
+
+const mapUrl = "data/india_full_final.geojson";
+
+
+
+  
+
+
+const svgWrap = d3.select("#svgWrap");
+const width = Math.min(window.innerWidth * 0.95, 1000);
+const height = 700;
+const svg = svgWrap.append("svg").attr("width", "100%").attr("viewBox", `0 0 ${width} ${height}`);
+const projection = d3.geoMercator()
+  .center([81, 18])        // Changed from [82.8, 22.5] - better center for full India
+  .scale(width * 1.2)      // Changed from 1.5 to 1.2 - zoom out more
+  .translate([width/2, height/1.5]);  // Changed from height/1.5 to height/2
+
+const pathGen = d3.geoPath().projection(projection);
+
+let features = [];
+let sequence = [];
+let idx = 0;
+
+let score = 0;
+let totalAttempts = 0;
+let attemptsForCurrent = 0;
+let revealedName = null;
+let flashName = null;
+let colored = new Map();
+
+const sounds = {
+  cheer: document.getElementById("s_cheer"),
+  clap:  document.getElementById("s_clap"),
+  phew:  document.getElementById("s_phew"),
+  wrong: document.getElementById("s_wrong"),
+  reveal:document.getElementById("s_reveal"),
+};
+
+const muteChk = document.getElementById("muteChk");
+muteChk.addEventListener("change", ()=> {
+  const mute = muteChk.checked;
+  Object.values(sounds).forEach(a=>a.muted = mute);
+});
+
+function maybePlay(audioEl){
+  if (!audioEl) return;
+  if (!audioEl.src) return;   // 👈 NEW: skip if no source
+  if (muteChk.checked) return;
+  try { audioEl.currentTime = 0; audioEl.play(); } catch(e){}
+}
+
+
+function pointsForAttempt(a0){ return a0===0?3:a0===1?2:a0===2?1:0; }
+function shouldRevealAfterWrong(prevWrong){ return prevWrong + 1 >= 3; }
+
+const scoreEl = document.getElementById("scoreEl");
+const attemptsEl = document.getElementById("attemptsEl");
+const promptEl = document.getElementById("prompt");
+const celebrationEl = document.getElementById("celebration");
+let tooltipEl = null;
+
+function showTooltip(x,y,text){
+  if (!tooltipEl){
+    tooltipEl = document.createElement("div");
+    tooltipEl.className = "tooltip";
+    document.body.appendChild(tooltipEl);
+  }
+  tooltipEl.style.left = (x + 10) + "px";
+  tooltipEl.style.top = (y + 10) + "px";
+  tooltipEl.textContent = text;
+  tooltipEl.style.display = "block";
+}
+function hideTooltip(){ if (tooltipEl) tooltipEl.style.display = "none"; }
+
+function updateScoreboard(){
+  scoreEl.textContent = `Score: ${score}`;
+  attemptsEl.textContent = `Attempts: ${Math.min(attemptsForCurrent,3)}/3`;
+}
+
+function buildSequence(){
+const normalizedTargets = TARGET_STATES.map(normalizeName);
+const targetFeatures = features.filter(f => 
+  normalizedTargets.includes(normalizeName(f.__name))
+);
+  sequence = d3.shuffle(targetFeatures.map(f=>normalizeName(f.__name)));
+  idx = 0;
+  colored = new Map();
+  score = 0;
+  totalAttempts = 0;
+  attemptsForCurrent = 0;
+  revealedName = null;
+  flashName = null;
+  updateScoreboard();
+  renderAllFills();
+  setPromptForCurrent();
+}
+
+function speakPrompt(text) {
+  if (!('speechSynthesis' in window)) return;
+
+  speechSynthesis.cancel(); // stop any ongoing speech
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = 'en-US';   // you can change to 'en-GB', 'en-IN', etc.
+
+  // Load voices (may be async in some browsers)
+  let voices = speechSynthesis.getVoices();
+  if (voices.length === 0) {
+    speechSynthesis.onvoiceschanged = () => speakPrompt(text);
+    return;
+  }
+
+  // Try to pick a female/kid-friendly voice
+  const preferred = voices.find(v =>
+    v.name.toLowerCase().includes("female") ||
+    v.name.toLowerCase().includes("child") ||
+    (v.lang === "en-US" && v.name.toLowerCase().includes("samantha")) ||
+    (v.lang === "en-GB" && v.name.toLowerCase().includes("serena"))
+  );
+
+  if (preferred) {
+    utter.voice = preferred;
+  } else {
+    // fallback: pick the first available English voice
+    const fallback = voices.find(v => v.lang.startsWith("en"));
+    if (fallback) utter.voice = fallback;
+  }
+
+  speechSynthesis.speak(utter);
+}
+
+
+function setPromptForCurrent(){
+  if (idx >= sequence.length){
+    promptEl.textContent = "Finished! Click Shuffle to play again.";
+    showEndPanel();
+    return;
+  }
+  const t = sequence[idx];
+const promptText = "Find " + displayNameMap.get(t);
+promptEl.textContent = promptText;
+speakPrompt(promptText);
+
+}
+
+
+
+function showEndPanel(){
+  const holder = document.getElementById("endPanelHolder");
+  holder.innerHTML = "";
+  const maxScore = sequence.length * 3;
+  const accuracy = maxScore ? Math.round((score / maxScore) * 100) : 0;
+  const div = document.createElement("div");
+  div.className = "end-panel";
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:700;font-size:16px">Quiz Complete</div>
+        <div style="color:#64748b">You finished the Large Countries round.</div>
+      </div>
+      <div>
+        <button id="replayBtn" style="padding:8px 12px;border-radius:8px;background:#0f172a;color:white;border:none">Shuffle & Replay</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;margin-top:12px">
+      <div style="padding:8px;border-radius:8px;background:#f8fafc"><div style="font-size:12px;color:#475569">Total Countries</div><div style="font-weight:700">${sequence.length}</div></div>
+      <div style="padding:8px;border-radius:8px;background:#f8fafc"><div style="font-size:12px;color:#475569">Score</div><div style="font-weight:700">${score} / ${maxScore}</div></div>
+      <div style="padding:8px;border-radius:8px;background:#f8fafc"><div style="font-size:12px;color:#475569">Accuracy</div><div style="font-weight:700">${accuracy}%</div></div>
+      <div style="padding:8px;border-radius:8px;background:#f8fafc"><div style="font-size:12px;color:#475569">Total Attempts</div><div style="font-weight:700">${totalAttempts}</div></div>
+    </div>
+  `;
+  holder.appendChild(div);
+  document.getElementById("replayBtn").addEventListener("click", ()=>{
+    holder.innerHTML = "";
+    buildSequence();
+  });
+}
+
+function fillForName(name){
+  name = normalizeName(name);
+  if (flashName === name) return getComputedStyle(document.documentElement).getPropertyValue('--fill-wrong');
+  if (revealedName === name) return getComputedStyle(document.documentElement).getPropertyValue('--fill-reveal');
+  const key = colored.get(name);
+  if (!key) return getComputedStyle(document.documentElement).getPropertyValue('--fill-default');
+  if (key === 'first') return getComputedStyle(document.documentElement).getPropertyValue('--fill-1');
+  if (key === 'second') return getComputedStyle(document.documentElement).getPropertyValue('--fill-2');
+  if (key === 'third') return getComputedStyle(document.documentElement).getPropertyValue('--fill-3');
+  if (key === 'reveal') return getComputedStyle(document.documentElement).getPropertyValue('--fill-reveal');
+  return '#e5e7eb';
+}
+
+/* >>> CHANGED: use .style("fill", ...) so it wins over CSS <<< */
+function renderAllFills(){
+  svg.selectAll("path.country")
+    .style("fill", d => {
+  const name = normalizeName(d.__name);
+  return TARGET_STATES.map(normalizeName).includes(name) ? fillForName(name) : "#f3f4f6";
+})
+    .classed("reveal", d => revealedName === normalizeName(d.__name));
+}
+
+function handleClick(d, node, evt){
+  const clickedName = normalizeName(d.__name);
+  if (idx >= sequence.length) return;
+
+  if (revealedName){
+    if (clickedName !== revealedName) return;
+    colored.set(clickedName, 'reveal');
+    revealedName = null;
+    renderAllFills();
+    maybePlay(sounds.reveal);
+    idx++;
+    attemptsForCurrent = 0;
+    setTimeout(()=> setPromptForCurrent(), 150);
+    return;
+  }
+
+  if (colored.get(clickedName)) return;
+
+  totalAttempts++;
+  if (clickedName === sequence[idx]){
+    const a = attemptsForCurrent;
+    const pts = pointsForAttempt(a);
+    const key = a===0 ? 'first' : (a===1 ? 'second' : 'third');
+    colored.set(clickedName, key);
+    score += pts;
+    const scoreDiv = document.getElementById("scoreEl");
+    scoreDiv.classList.add("pulse");
+    setTimeout(()=> scoreDiv.classList.remove("pulse"), 500);
+    if (a===0){ showCelebration("first"); maybePlay(sounds.cheer); }
+    else if (a===1){ showCelebration("second"); maybePlay(sounds.clap); }
+    else { showCelebration("third"); maybePlay(sounds.phew); }
+    idx++;
+    attemptsForCurrent = 0;
+    updateScoreboard();
+    renderAllFills();
+    setTimeout(()=> setPromptForCurrent(), 800);
+  } else {
+    attemptsForCurrent++;
+    flashName = clickedName;
+    renderAllFills();
+    maybePlay(sounds.wrong);
+
+
+// 👇 Show wrong country in celebration message area
+celebrationEl.style.display = "block";
+celebrationEl.textContent = "❌ That is " + clickedName;
+setTimeout(()=> celebrationEl.style.display = "none", 1200);
+
+setTimeout(()=>{ 
+  flashName = null; 
+  renderAllFills(); 
+}, 650);
+
+
+
+    const attemptsDiv = document.getElementById("attemptsEl");
+    attemptsDiv.classList.add("shake");
+    setTimeout(()=> attemptsDiv.classList.remove("shake"), 360);
+
+    if (shouldRevealAfterWrong(attemptsForCurrent - 1)){
+      revealedName = sequence[idx];
+      maybePlay(sounds.reveal);
+      renderAllFills();
+      promptEl.textContent = "System identified: " + revealedName + " — click it to continue";
+    } else {
+      updateScoreboard();
+    }
+  }
+}
+
+function showCelebration(which){
+  celebrationEl.style.display = "block";
+  if (which === "first"){ celebrationEl.textContent = "🎉 Awesome! You got it in first try!"; }
+  else if (which === "second"){ celebrationEl.textContent = "👏 Good Job! 2nd try"; }
+  else { celebrationEl.textContent = "😅 Phew! Finally in 3rd try"; }
+  setTimeout(()=> celebrationEl.style.display = "none", 1100);
+}
+
+function handleMouseEnter(d, evt){
+  const name = normalizeName(d.__name);
+  if (colored.get(name)) showTooltip(evt.clientX, evt.clientY, name);
+}
+function handleMouseLeave(){ hideTooltip(); }
+
+d3.json(mapUrl).then(geo => {
+console.log("=== ALL STATE/UT NAMES IN GEOJSON ===");
+  const allNames = geo.features.map(f => f.properties?.NAME_1 || "").sort();
+  allNames.forEach((name, index) => {
+    console.log(`${index + 1}. "${name}"`);
+  });
+  console.log("\n=== COPY-PASTE READY ARRAY ===");
+  console.log(JSON.stringify(allNames, null, 2));
+  
+  features = geo.features.map(f => {
+  const stateName = f.properties?.NAME_1 || "";   // fallback if missing
+  return {
+    ...f,
+    __name: stateName  // Keep original name, normalize only when comparing
+  };
+});
+
+
+  svg.selectAll("path.country")
+    .data(features, d => d.__name)
+    .join("path")
+    .attr("class", "country")
+    .attr("d", pathGen)
+    .attr("id", d => "c-" + d.__name.replace(/\s+/g,"_"))
+    /* >>> CHANGED: style(), not attr() <<< */
+    .style("fill", d => {
+      const name = normalizeName(d.__name);
+      return TARGET_STATES.includes(name) ? fillForName(name) : "#f3f4f6";
+    })
+    .on("click", function(event, d){
+  if (TARGET_STATES.map(normalizeName).includes(normalizeName(d.__name))) {
+    handleClick(d, this, event);
+    updateScoreboard();
+  }
+})
+    .on("mouseenter", function(event, d){
+  if (TARGET_STATES.map(normalizeName).includes(normalizeName(d.__name))) handleMouseEnter(d, event);
+})
+    .on("mouseleave", handleMouseLeave);
+
+  buildSequence();
+  updateScoreboard();
+}).catch(err => {
+  console.error("Failed to load map:", err);
+  document.getElementById("prompt").textContent = "Failed to load map — check console.";
+});
+
+document.addEventListener('click', (e)=> {
+  if (tooltipEl && !tooltipEl.contains(e.target)) { hideTooltip(); }
+});
+</script>
+</body>
+</html>

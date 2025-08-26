@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Ye Mera India Quiz</title>
+<script src="https://d3js.org/d3.v6.min.js"></script>
+<style>
+  :root{
+    --bg:#eef2ff;
+    --card-bg: rgba(255,255,255,0.95);
+    --stroke: #94a3b8;
+    --fill-default: #e5e7eb;
+    --fill-correct: #22c55e;   /* green */
+    --fill-neutral: #f3f4f6;
+    --fill-wrong: #ef4444;     /* red flash */
+  }
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+  body{background:var(--bg);display:flex;flex-direction:column;align-items:center;}
+  .app{width:100%;max-width:1100px;padding:18px 12px 60px 12px;box-sizing:border-box;}
+  header{width:100%;display:flex;align-items:center;justify-content:center;position:relative;margin-bottom:12px}
+  h1{margin:0;font-size:32px}
+
+  /* Map sizing */
+  svg{width:100%;height:auto;aspect-ratio:3/4;display:block}
+
+  path.country{fill:var(--fill-default);stroke:var(--stroke);stroke-width:0.5;cursor:pointer;transition:fill 180ms ease,opacity 180ms;}
+  path.country:hover{opacity:0.92}
+
+  /* Prompt (left) and Scoreboard (right) */
+  .prompt{
+    position:absolute;top:110px;left:140px;
+    background:#0f172a;color:white;padding:10px 12px;border-radius:10px;font-weight:600;max-width:300px;
+  }
+  .prompt ul{list-style:none;margin:0;padding:0}
+  .prompt li{margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+  .prompt li span.tick{margin-left:8px;color:#22c55e;font-weight:bold}
+
+  .scoreboard{
+    position:absolute;top:110px;right:140px;
+    background:var(--card-bg);padding:8px 14px;border-radius:12px;display:flex;gap:16px;font-weight:600;
+  }
+
+  #svgWrap{display:flex;justify-content:center;margin-top:10px}
+
+  .tooltip{
+    position:fixed;pointer-events:none;background:#0f172a;color:white;padding:6px 8px;border-radius:6px;
+    font-size:13px;z-index:80;box-shadow:0 6px 20px rgba(2,6,23,0.5)
+  }
+
+  .flash{
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    background:rgba(0,0,0,0.8);color:#fff;font-size:28px;font-weight:700;padding:20px 40px;border-radius:12px;display:none;z-index:999;
+  }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header><h1>Find Indian States & UTs</h1></header>
+
+    <!-- Single scoreboard (remove duplicates) -->
+    <div class="scoreboard" id="scoreboard">
+      <div id="scoreEl">Score: 0</div>
+      <div id="attemptsEl">Attempts: 6</div>
+      <div id="timer">Time: 30</div>
+    </div>
+
+    <div id="flashMessage" class="flash"></div>
+
+    <div class="map-card" id="mapCard">
+      <div id="prompt" class="prompt">Loading map…</div>
+      <div id="svgWrap"></div>
+    </div>
+  </div>
+
+<script>
+const TARGET_STATES = [
+  "Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa","Gujarat",
+  "Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Madhya Pradesh","Maharashtra",
+  "Manipur","Meghalaya","Mizoram","Nagaland","Orissa","Punjab","Rajasthan","Sikkim","Tamil Nadu",
+  "Telangana","Tripura","Uttar Pradesh","Uttaranchal","West Bengal","Andaman and Nicobar",
+  "Chandigarh","Dadra and Nagar Haveli","Daman and Diu","Delhi","Jammu and Kashmir",
+  "Lakshadweep","Puducherry"
+];
+
+const mapUrl = "data/india_full_final.geojson";
+
+/* Game state */
+let features = [];
+let remainingStates = [...TARGET_STATES]; // pool that shrinks forever
+let currentTargets = [];                   // the 4 for this round
+let foundStates = new Set();               // ALL rounds (kept green)
+let roundFound = new Set();                // THIS round only
+let attemptsLeft = 6;
+let timeLeft = 30;
+let gameTimer = null;
+let score = 0;
+let roundActive = false;
+let pointsFromCorrect = 0;
+let pointsFromWrong = 0;
+let pointsFromBonus = 0;
+
+
+/* UI refs */
+const scoreEl = document.getElementById("scoreEl");
+const attemptsEl = document.getElementById("attemptsEl");
+const timerEl = document.getElementById("timer");
+const promptEl = document.getElementById("prompt");
+
+let tooltipEl = null;
+
+/* Flash */
+function showFlashMessage(text){
+  const el = document.getElementById("flashMessage");
+  el.textContent = text;
+  el.style.display = "block";
+  setTimeout(()=>{ el.style.display="none"; }, 1500);
+}
+
+/* Tooltip only for already-found (green) shapes */
+function showTooltip(x,y,text){
+  if (!tooltipEl){
+    tooltipEl = document.createElement("div");
+    tooltipEl.className = "tooltip";
+    document.body.appendChild(tooltipEl);
+  }
+  tooltipEl.style.left = (x + 10) + "px";
+  tooltipEl.style.top  = (y + 10) + "px";
+  tooltipEl.textContent = text;
+  tooltipEl.style.display = "block";
+}
+function hideTooltip(){ if (tooltipEl) tooltipEl.style.display = "none"; }
+
+/* UI updates */
+function updateScoreboard(){
+  scoreEl.textContent = `Score: ${score}`;
+  attemptsEl.textContent = `Attempts: ${attemptsLeft}`;
+  timerEl.textContent = `Time: ${timeLeft}`;
+}
+
+function renderPromptList(){
+  if (remainingStates.length === 0) return;
+  let html = "<ul>";
+  currentTargets.forEach(t=>{
+    html += `<li>${t}${roundFound.has(t) ? '<span class="tick">✔</span>' : ''}</li>`;
+  });
+  html += "</ul>";
+  promptEl.innerHTML = html;
+}
+
+/* Colors: keep greens for all previously found */
+function renderAllFills(){
+  svg.selectAll("path.country")
+    .style("fill", d => {
+      if (!TARGET_STATES.includes(d.__name)) return "var(--fill-neutral)";
+      if (foundStates.has(d.__name))        return "var(--fill-correct)";
+      return "var(--fill-default)";
+    });
+    // Update tiny state circles
+  svg.selectAll("circle.tiny")
+    .style("fill", d => {
+      if (foundStates.has(d.__name)) return "var(--fill-correct)";
+      return "rgba(100, 149, 237, 0.4)";  // faint blue if not found
+    });
+}
+
+/* Round lifecycle */
+function endRound(){
+  if (!roundActive) return;
+  roundActive = false;
+  clearInterval(gameTimer);
+  showFlashMessage("Next Round");
+  setTimeout(startRound, 1500);
+}
+
+function startRound(){
+  if (remainingStates.length === 0){
+   
+   const scoreboard = document.getElementById("scoreboard");
+   scoreboard.innerHTML = `
+    <div style="text-align:left;">
+      <h3 style="margin:0 0 8px 0;">🏆 Final Score: ${score}</h3>
+      <div>✔ Correct: <strong>${pointsFromCorrect}</strong></div>
+      <div>❌ Wrong penalties: <strong> ${pointsFromWrong}</strong></div>
+      <div>⏱ Time bonuses: <strong>${pointsFromBonus}</strong></div>
+      <hr style="margin:8px 0;border:0;border-top:1px solid #ddd;">
+      <button id="playAgainBtn" style="margin-top:6px;padding:6px 12px;border-radius:6px;background:#0f172a;color:white;border:none;cursor:pointer">
+        Play Again
+      </button>
+    </div>
+  `;
+ promptEl.innerHTML = `
+  <div style="padding:12px;text-align:center;">
+    <h2>🎉 You finished the full India map!</h2>
+    <p>Well done! Check your final score →</p>
+  </div>
+`;
+    roundActive = false;
+    clearInterval(gameTimer);
+    document.getElementById("playAgainBtn").addEventListener("click", () => {
+  location.reload();   // refreshes the whole game
+});
+  }
+
+  clearInterval(gameTimer);
+  attemptsLeft = 6;
+  timeLeft = 30;
+  roundFound = new Set();
+  roundActive = true;
+
+  currentTargets = d3.shuffle(remainingStates).slice(0, Math.min(4, remainingStates.length));
+  renderPromptList();
+  updateScoreboard();
+  renderAllFills();
+
+  gameTimer = setInterval(()=>{
+    timeLeft--;
+    updateScoreboard();
+    if (timeLeft <= 0) endRound();
+  }, 1000);
+}
+
+/* Click handling */
+function handleClick(d, node){
+  if (!roundActive) return;
+
+  // Every click consumes an attempt
+  attemptsLeft = Math.max(0, attemptsLeft - 1);
+
+  if (currentTargets.includes(d.__name)){
+    // Correct
+    foundStates.add(d.__name);
+    roundFound.add(d.__name);
+    score += 20;
+    pointsFromCorrect += 20;
+    remainingStates = remainingStates.filter(s => s !== d.__name);
+
+    renderAllFills();
+    renderPromptList();
+
+    // If all 4 (or fewer, if fewer remained) are found -> end immediately
+    if (roundFound.size === currentTargets.length){
+      let bonus = Math.floor(timeLeft * 0.5);
+score += bonus;
+pointsFromBonus += bonus;
+      updateScoreboard();
+      endRound();
+      return;
+    }
+  } else {
+    // Wrong: small penalty + red flash
+    score -= 10;
+    pointsFromWrong -= 10;
+    const sel = d3.select(node);
+    sel.style("fill", "var(--fill-wrong)");
+    setTimeout(()=>renderAllFills(), 400);
+  }
+
+  updateScoreboard();
+  if (attemptsLeft <= 0) endRound();
+}
+
+/* D3 map setup */
+const svgWrap = d3.select("#svgWrap");
+const width = Math.min(window.innerWidth * 0.95, 1000);
+const height = 700;
+const svg = svgWrap.append("svg").attr("viewBox", `0 0 ${width} ${height}`);
+const projection = d3.geoMercator()
+  .center([80, 8])
+  .scale(width * 1.1)
+  .translate([width/2, height/2.1]);
+
+const pathGen = d3.geoPath().projection(projection);
+
+d3.json(mapUrl).then(geo=>{
+  features = geo.features.map(f => ({...f, __name: f.properties?.NAME_1 || ""}));
+
+  svg.selectAll("path.country")
+    .data(features)
+    .join("path")
+    .attr("class","country")
+    .attr("d", pathGen)
+    .style("fill","var(--fill-default)")
+    .on("click", function(event,d){ handleClick(d,this); })
+    .on("mouseenter", function(event,d){
+      // Only show tooltip for already-found (green) items
+      if (!remainingStates.includes(d.__name)) {
+        showTooltip(event.clientX, event.clientY, d.__name);
+      }
+    })
+    .on("mouseleave", hideTooltip);
+const tinyStates = ["Daman and Diu","Puducherry","Chandigarh","Lakshadweep","Andaman and Nicobar","Dadra and Nagar Haveli"];
+
+svg.selectAll("circle.tiny")
+  .data(features.filter(f => tinyStates.includes(f.__name)))
+  .join("circle")
+  .attr("class","tiny")
+  .attr("cx", d => projection(d3.geoCentroid(d))[0])
+  .attr("cy", d => projection(d3.geoCentroid(d))[1])
+  .attr("r", 10)
+  .style("fill","rgba(100, 149, 237, 0.4)")   // faint blue initially
+  .style("stroke","#333")
+  .style("stroke-width",0.8)
+  .style("cursor","pointer")
+  .on("click", function(event,d){ handleClick(d,this); })
+  .on("mouseenter", function(event,d){
+    if (!remainingStates.includes(d.__name)) {
+      showTooltip(event.clientX,event.clientY,d.__name);
+    }
+  })
+  .on("mouseleave", hideTooltip);
+
+  startRound();
+});
+</script>
+</body>
+</html>
