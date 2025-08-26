@@ -315,16 +315,23 @@ pointsFromBonus += bonus;
 /* D3 map setup */
 /* D3 map setup */
 const svgWrap = d3.select("#svgWrap");
-const svg = svgWrap.append("svg")
-  .attr("preserveAspectRatio", "xMidYMid meet")   // keeps proportions
-  .attr("viewBox", "0 0 1000 700");               // base box, can tweak ratio
+// pick dynamic size
+const width  = window.innerWidth * 0.95;   // <= cap desktop width
+const height = window.innerHeight * 0.8;                  // <= use 80% viewport height
 
+const svg = svgWrap.append("svg")
+ .attr("width", width)   // give it explicit width
+  .attr("height", height) // and explicit height
+  .attr("viewBox", `0 0 ${width} ${height}`)
+  .attr("preserveAspectRatio", "xMidYMid meet");
+  
 const projection = d3.geoMercator();
 const pathGen = d3.geoPath().projection(projection);
 
 d3.json(mapUrl).then(geo=>{
   features = geo.features.map(f => ({...f, __name: f.properties?.NAME_1 || ""}));
-  projection.fitSize([1000, 700], geo);
+    // 🔑 this makes the map fill that full box
+  projection.fitSize([width, height], geo);
 
   svg.selectAll("path.country")
     .data(features)
