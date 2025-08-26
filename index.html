@@ -52,6 +52,33 @@
     position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
     background:rgba(0,0,0,0.8);color:#fff;font-size:28px;font-weight:700;padding:20px 40px;border-radius:12px;display:none;z-index:999;
   }
+  /* ✅ Mobile & Tablet Responsive Layout */
+@media (max-width: 768px) {
+  .prompt, .scoreboard {
+    position: static;       /* remove absolute positioning */
+    margin: 10px auto;      /* center them */
+    max-width: 90%;
+    text-align: center;
+  }
+
+  #mapCard {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  #svgWrap {
+    width: 95vw;            /* fit screen width */
+    margin: 10px 0;
+  }
+
+  #svgWrap svg {
+    width: 100%;
+    height: auto;
+    max-height: 70vh;       /* prevent overflowing vertically */
+  }
+}
+
 </style>
 </head>
 <body>
