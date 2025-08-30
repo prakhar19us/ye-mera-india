@@ -316,8 +316,13 @@ pointsFromBonus += bonus;
 /* D3 map setup */
 const svgWrap = d3.select("#svgWrap");
 // pick dynamic size
-const width  = window.innerWidth * 0.95;   // <= cap desktop width
-const height = window.innerHeight * 0.8;                  // <= use 80% viewport height
+// Detect if mobile (say < 768px wide)
+const isMobile = window.innerWidth < 768;
+
+const width  = isMobile ? window.innerWidth * 0.95 : window.innerWidth * 0.85;
+const height = isMobile ? window.innerHeight * 0.75 : window.innerHeight * 0.80;
+//const width  = window.innerWidth * 0.80;   // <= cap desktop width
+//const height = window.innerHeight * 0.95;                  // <= use 80% viewport height
 
 const svg = svgWrap.append("svg")
  .attr("width", width)   // give it explicit width
